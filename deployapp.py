@@ -3,22 +3,37 @@ import streamlit as st
 import datetime, time
 import numpy as np
 import plotly.graph_objects as go
+import plotly.express as px
 import pandas_datareader as pdr
 import pandas as pd
+import joblib
+import s3fs
 
-df = pd.DataFrame()
 
-@st.cache
+@st.experimental_memo
 def load_data():
-    startdate = datetime.datetime(2002,1,1)
-    enddate = datetime.date.today()
-    df = pdr.get_data_yahoo('HDFC.NS', startdate, enddate)
-    return df
+    if st.secrets['USEAWS']=="TRUE":
+        fs = s3fs.S3FileSystem(anon=False)
+        with fs.open('appliedroot-project-stock/testdict.sav') as f:
+            loaddict = joblib.load(f)
+        return loaddict 
+    else:
+        loaddict = joblib.load('testdict.sav')
+        return loaddict
     
 def predict(loaded_data, stock, ldays, fdays):
-    st.write(stock)
-    st.write(ldays)
-    st.write(fdays)
+    lkey = stock+'_ldays'
+    fkey = stock+'_fdays'
+    lstock = loaded_data[lkey]
+    fstock = loaded_data[fkey]
+    lstock = lstock.tail(ldays)
+    fstock = fstock.head(fdays)  
+    fig = go.Figure()
+    fig.add_trace(go.Scatter(x=lstock.index, y=lstock['Close'], name='Actual', fillcolor='blue', mode='lines'))
+    fig.add_trace(go.Scatter(x=fstock.index, y=fstock['Close'], name='Forecasted', fillcolor='red', mode='lines+markers'))
+    fig.update_layout(title=stock.title() + " Price Forecast", xaxis_title="Date", yaxis_title="Closing Price", height=500, width=800)
+    graph.plotly_chart(fig, height=500, width=800)
+    
 
 
 #Setup Page
@@ -26,6 +41,7 @@ st.set_page_config(layout="wide", initial_sidebar_state="expanded")
 st.title('STOCK FORECAST')
 current_status = st.empty()
 current_status.write("Current Status: Data App Loaded")
+graph = st.empty()
 
 #Store Data Loaded in Session State
 if 'data_loaded' not in st.session_state:
@@ -43,26 +59,31 @@ if task=='Load Model':
     if(st.session_state['data_loaded']):
         current_status.write('Data Already Loded Please Forecast')
     else:
-        df = load_data()
-        current_status.write('Data Loaded!')
+        data = load_data()
+        st.session_state['extracted_data'] = data
+        st.session_state['last_update'] = data['last_update']
+        st.session_state['stock_list'] = data['stock_list']
+        current_status.write('Finished Loading the Data!')
         st.session_state['data_loaded'] = True
-        st.write(df)
+
 elif task=='Forecast':
     if(not(st.session_state['data_loaded'])):
         current_status.write('Please Load the data before Forecasting')
     else:
-        trained_stocks = np.array([ "GOOG", "GME", "FB","AAPL",'TSLA']) 
+        data = st.session_state['extracted_data']
+        stock_list = st.session_state['stock_list']
         #Set Session Variable If Not Present
         if 'stock' not in st.session_state:
-            st.session_state['stock'] = 'GOOG'
+            st.session_state['stock'] = stock_list[0]
         if 'ldays' not in st.session_state:
             st.session_state['ldays'] = 30
         if 'fdays' not in st.session_state:
             st.session_state['fdays'] = 5
-        controller.selectbox("Select Stock", trained_stocks, key='stock')
-        controller.slider("Last Known Days", 10, 200, 30, key='ldays')
-        controller.slider("Forecast Days", 1, 10, 5, key='fdays')
-        if controller.button('Run Model'):
-            predict(df, st.session_state['stock'], st.session_state['ldays'], st.session_state['fdays'])
+        pforecast = controller.container()
+        pforecast.selectbox("Select Stock", stock_list, key='stock')
+        pforecast.slider("Last Known Days", 10, 200, 30, key='ldays')
+        pforecast.slider("Forecast Days", 1, 10, 5, key='fdays')
+        with pforecast:
+            predict(data, st.session_state['stock'], st.session_state['ldays'], st.session_state['fdays'])
 else:
     pass
