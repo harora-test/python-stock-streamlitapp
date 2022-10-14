@@ -10,7 +10,6 @@ import joblib
 import s3fs
 
 
-@st.experimental_memo
 def load_data():
     if st.secrets['USEAWS']=="TRUE":
         fs = s3fs.S3FileSystem(anon=False)
